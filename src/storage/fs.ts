@@ -149,6 +149,11 @@ export async function renameBoard(project: Dir, from: string, to: string): Promi
   const text = await readText(project, from + BOARD_EXT);
   await writeText(project, target + BOARD_EXT, text);
   await project.removeEntry(from + BOARD_EXT);
+  try {
+    await project.removeEntry(from + PREVIEW_EXT); // the next save writes a new preview
+  } catch {
+    /* no preview yet */
+  }
   return target;
 }
 
@@ -179,32 +184,70 @@ const blobToDataURL = (blob: Blob) =>
     r.readAsDataURL(blob);
   });
 
-export async function loadBoard(project: Dir, board: string): Promise<LoadedBoard & { savedFileIds: Set<string> }> {
-  const data = JSON.parse(await readText(project, board + BOARD_EXT));
-  const files: Record<string, any> = { ...(data.files || {}) };
-  const savedFileIds = new Set<string>();
-  const index: Record<string, { mimeType: string; path: string; created: number }> = data.fileIndex || {};
-  let filesDir: Dir | null = null;
+/** What the board file looked like when the app last read or wrote it. Used to spot edits made by other programs. */
+export interface DiskStamp {
+  lastModified: number;
+  text: string;
+}
+
+type FileIndex = Record<string, { mimeType: string; path: string; created: number }>;
+
+/** Reads the images listed in a board's fileIndex, skipping ids that are already loaded. */
+export async function loadFiles(project: Dir, index: FileIndex, skip: Set<string> = new Set()) {
+  const files: Record<string, any> = {};
+  const ids = Object.keys(index).filter((id) => !skip.has(id));
+  if (!ids.length) return files;
+  let filesDir: Dir;
   try {
     filesDir = await project.getDirectoryHandle("files");
   } catch {
-    /* no images yet */
+    return files; // no images yet
   }
-  if (filesDir) {
-    await Promise.all(
-      Object.entries(index).map(async ([id, meta]) => {
-        try {
-          const fh = await filesDir!.getFileHandle(meta.path.replace(/^files\//, ""));
-          const blob = await fh.getFile();
-          files[id] = { id, mimeType: meta.mimeType, dataURL: await blobToDataURL(blob), created: meta.created };
-          savedFileIds.add(id);
-        } catch {
-          console.warn("Missing image file", meta.path);
-        }
-      }),
-    );
-  }
-  return { elements: data.elements || [], appState: data.appState || {}, files, savedFileIds };
+  await Promise.all(
+    ids.map(async (id) => {
+      const meta = index[id];
+      try {
+        const blob = await (await filesDir.getFileHandle(meta.path.replace(/^files\//, ""))).getFile();
+        files[id] = { id, mimeType: meta.mimeType, dataURL: await blobToDataURL(blob), created: meta.created };
+      } catch {
+        console.warn("Missing image file", meta.path);
+      }
+    }),
+  );
+  return files;
+}
+
+/** Last-modified time of a board file (cheap; used for polling). */
+export async function boardModified(project: Dir, board: string): Promise<File> {
+  return (await project.getFileHandle(board + BOARD_EXT)).getFile();
+}
+
+export async function loadBoard(project: Dir, board: string): Promise<LoadedBoard & { savedFileIds: Set<string>; stamp: DiskStamp }> {
+  const file = await boardModified(project, board);
+  const text = await file.text();
+  const data = JSON.parse(text);
+  const files: Record<string, any> = { ...(data.files || {}), ...(await loadFiles(project, data.fileIndex || {})) };
+  const savedFileIds = new Set(Object.keys(data.fileIndex || {}).filter((id) => files[id]));
+  return {
+    elements: data.elements || [],
+    appState: data.appState || {},
+    files,
+    savedFileIds,
+    stamp: { lastModified: file.lastModified, text },
+  };
+}
+
+/** Parses a board file that another program changed. */
+export function parseBoard(text: string): { elements: any[]; fileIndex: FileIndex } {
+  const data = JSON.parse(text);
+  return { elements: Array.isArray(data.elements) ? data.elements : [], fileIndex: data.fileIndex || {} };
+}
+
+export const PREVIEW_EXT = ".preview.png";
+
+/** Writes <board>.preview.png next to the board so other tools (e.g. Claude) can see it. */
+export async function savePreview(project: Dir, board: string, png: Blob) {
+  await writeText(project, board + PREVIEW_EXT, png);
 }
 
 const PERSISTED_APPSTATE = ["viewBackgroundColor", "gridSize", "gridStep", "gridModeEnabled", "scrollX", "scrollY", "zoom", "theme"];
@@ -236,7 +279,10 @@ export async function saveBoard(
   const state: Record<string, any> = {};
   for (const k of PERSISTED_APPSTATE) if (appState[k] !== undefined) state[k] = appState[k];
   const doc = { type: "excalidraw", version: 2, source: "sketchnotes", elements: live, appState: state, files: {}, fileIndex };
-  await writeText(project, board + BOARD_EXT, JSON.stringify(doc));
+  const text = JSON.stringify(doc);
+  await writeText(project, board + BOARD_EXT, text);
+  const stamp: DiskStamp = { lastModified: (await boardModified(project, board)).lastModified, text };
+  return stamp;
 }
 
 /** Writes a file to <project>/exports/ and returns its relative path. */

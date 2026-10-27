@@ -23,6 +23,7 @@ There is **no backend**:
 - [Drawing](#drawing)
 - [AI assistant](#ai-assistant)
 - [Voice prompts](#voice-prompts)
+- [Use with Claude Code](#use-with-claude-code)
 - [Keyboard shortcuts](#keyboard-shortcuts)
 - [Where your files go](#where-your-files-go)
 - [Privacy and security](#privacy-and-security)
@@ -358,6 +359,52 @@ Voice engines (Settings → Voice prompts):
 
 ---
 
+## Use with Claude Code
+
+A skill in [skills/sketchnotes](skills/sketchnotes) lets Claude Code read and draw on your boards.
+It works from any project, in the Claude desktop app's Code tab or the `claude` terminal.
+
+- **Draw editable diagrams.** For example: "Draw the architecture of this repo on a new SketchNotes
+  board in Acme App". Claude writes real shapes and connected arrows, not a picture, so you can move and
+  edit them in the app.
+- **Read your markups.** For example: "Implement the changes I marked on the Call 27 Oct board". Claude
+  reads the screenshots, highlights, red marks, sticky notes and arrows, looks at the board's preview,
+  turns them into a list of changes, and can make them in your code.
+- **Report back on the board.** Claude can add notes such as "✓ Done: header colour" next to the
+  screenshot.
+
+If the board is open, Claude's changes appear within about 2 seconds.
+
+### Install the skill
+
+This copies it to your personal skills folder, so it's available in every project:
+
+```bash
+mkdir -p ~/.claude/skills && cp -R skills/sketchnotes ~/.claude/skills/
+```
+
+Then tell Claude where your projects folder is. It defaults to `~/Documents/SketchNotes`:
+
+```bash
+node ~/.claude/skills/sketchnotes/scripts/sketchnotes.mjs set-folder "~/Documents/SketchNotes"
+```
+
+### Requirements
+
+- **A real folder.** Boards must be saved in a projects folder opened with **Open projects folder…**.
+  Claude can't reach boards kept in browser storage.
+- **Node.js 18 or newer** for the skill's helper script. It has no other dependencies.
+- **Claude Code.** Regular claude.ai chat can't see files on your computer.
+
+The skill uses a helper script rather than editing board files directly, which keeps arrows attached
+and ids stable. You can also run it yourself:
+
+```bash
+node ~/.claude/skills/sketchnotes/scripts/sketchnotes.mjs list
+```
+
+---
+
 ## Keyboard shortcuts
 
 | Shortcut | Action |
@@ -381,12 +428,17 @@ Voice engines (Settings → Voice prompts):
 SketchNotes/                     <- the folder you picked
   Acme App/                      <- a project (one per client or app)
     Call 27 Oct 2026.excalidraw  <- a board
+    Call 27 Oct 2026.preview.png <- picture of the whole board, updated after each change
     files/                       <- images used on the boards (pasted and AI-generated)
     exports/                     <- AI notes you saved (.md)
 ```
 
 - **Saving.** Boards save automatically a moment after each change. The sidebar shows
   "Saved ✓".
+- **Live reload.** If another program changes the open board's file (for example
+  [Claude Code](#use-with-claude-code)), the board updates within about 2 seconds. The change is merged
+  with yours, and ⌘Z or the undo button reverses it. New boards and projects appear in the sidebar by
+  themselves.
 - **Format.** Boards are standard Excalidraw JSON. To open one at excalidraw.com, use the menu →
   *Export* to get a single file with the images embedded.
 - **Backups.** Back up or sync the folder like any other: Time Machine, iCloud Drive, Dropbox or
@@ -460,7 +512,8 @@ src/
   App.tsx                  layout, board loading/saving, presets
   settings.ts              settings, default models, model migrations
   scene.ts                 element helpers (boxes, arrow binding)
-  storage/fs.ts            folder access, projects, boards, images, exports
+  storage/fs.ts            folder access, projects, boards, images, exports, previews
+  storage/sync.ts          merges outside edits to the open board (live reload)
   recognize/geometry.ts    shape recognizer (pure geometry)
   recognize/recognition.ts replaces strokes with clean shapes on the canvas
   ai/providers.ts          Claude / OpenAI / Gemini / OpenRouter calls (chat, images, model lists, speech)
@@ -470,6 +523,7 @@ src/
   styles.css               theme and layout
 Dockerfile, docker-compose.yml   static build served by nginx on 127.0.0.1:8080
 .github/workflows/deploy-pages.yml  builds and publishes to GitHub Pages on push to main
+skills/sketchnotes/              Claude Code skill: SKILL.md + helper script (scripts/sketchnotes.mjs)
 ```
 
 ### How the AI edits the board

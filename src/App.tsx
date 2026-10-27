@@ -1,5 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Excalidraw, MainMenu, WelcomeScreen, getSceneVersion } from "@excalidraw/excalidraw";
+import {
+  CaptureUpdateAction,
+  Excalidraw,
+  MainMenu,
+  WelcomeScreen,
+  exportToBlob,
+  getCommonBounds,
+  getSceneVersion,
+  restoreElements,
+} from "@excalidraw/excalidraw";
 import { AIPanel } from "./components/AIPanel";
 import { PenBar, type Preset, type PresetId } from "./components/PenBar";
 import { SettingsDialog } from "./components/SettingsDialog";
@@ -7,24 +16,48 @@ import { Sidebar } from "./components/Sidebar";
 import { handleStrokeEnd } from "./recognize/recognition";
 import { SETTINGS_KEY, loadSettings, saveSettings, type Settings } from "./settings";
 import {
+  boardModified,
   createBoard,
   createProject,
   listProjects,
   loadBoard,
+  loadFiles,
+  parseBoard,
   pickFolderWorkspace,
   renameBoard,
   requestPermission,
   restoreWorkspace,
   saveBoard,
   saveExport,
+  savePreview,
   useBrowserWorkspace,
+  type DiskStamp,
   type ProjectInfo,
   type WorkspaceKind,
 } from "./storage/fs";
+import { mergeExternal, sameScene } from "./storage/sync";
 
 type Current = { project: ProjectInfo; board: string };
 
 const LAST_KEY = "sketchnotes.last";
+const POLL_MS = 1500; // how often the open board's file is checked for outside edits
+const PREVIEW_DELAY_MS = 2500;
+const PREVIEW_MAX_SIDE = 2400;
+
+/**
+ * Fills in anything an outside program left out of an element (seed, index, bindings…).
+ * Text written outside the app carries customData.needsMeasure; those get measured with the real font.
+ */
+function normalize(elements: any[]) {
+  const needsMeasure = elements.some((e) => e?.customData?.needsMeasure);
+  const out = restoreElements(elements, null, { refreshDimensions: needsMeasure, repairBindings: true }) as any[];
+  if (!needsMeasure) return out;
+  return out.map((e) => {
+    if (!e.customData?.needsMeasure) return e;
+    const { needsMeasure: _, ...rest } = e.customData;
+    return { ...e, customData: Object.keys(rest).length ? rest : undefined };
+  });
+}
 const STYLE_KEYS = [
   "currentItemStrokeColor", "currentItemBackgroundColor", "currentItemFillStyle",
   "currentItemStrokeWidth", "currentItemOpacity", "currentItemRoughness",
@@ -54,6 +87,17 @@ export default function App() {
   settingsRef.current = settings;
   const save = useRef({ timer: 0 as any, lastSig: null as string | null, savedFileIds: new Set<string>(), pending: null as null | (() => Promise<void>) });
   const tempPreset = useRef<{ tool: string; restore: Record<string, any> } | null>(null);
+  // the board file as we last read/wrote it; disk reads and writes run one at a time through `queue`
+  const disk = useRef({ stamp: null as DiskStamp | null, syncedIds: new Set<string>(), queue: Promise.resolve() as Promise<unknown> });
+  const preview = useRef({ timer: 0 as any, sig: "" });
+  const live = useRef({ api: null as any, current: null as Current | null, projects: [] as ProjectInfo[], ws: null as FileSystemDirectoryHandle | null });
+  live.current = { api, current, projects, ws };
+
+  const serial = <T,>(fn: () => Promise<T>): Promise<T> => {
+    const run = disk.current.queue.then(fn, fn);
+    disk.current.queue = run.catch(() => undefined);
+    return run;
+  };
 
   const toast = useCallback((msg: string) => {
     setToastMsg(msg);
@@ -127,20 +171,83 @@ export default function App() {
     if (p) await p();
   };
 
+  /** Merges a board file that changed outside the app into the canvas. */
+  const applyExternal = async (target: Current, a: any, text: string, lastModified: number) => {
+    const { elements: raw, fileIndex } = parseBoard(text);
+    const incoming = normalize(raw);
+    const local = a.getSceneElementsIncludingDeleted();
+    const merged = mergeExternal(local, incoming, disk.current.syncedIds);
+    const newFiles = await loadFiles(target.project.handle, fileIndex, new Set(Object.keys(a.getFiles())));
+    if (Object.keys(newFiles).length) {
+      a.addFiles(Object.values(newFiles));
+      for (const id of Object.keys(newFiles)) save.current.savedFileIds.add(id);
+    }
+    disk.current.stamp = { lastModified, text };
+    disk.current.syncedIds = new Set(incoming.map((e: any) => e.id));
+    if (!sameScene(local, merged)) {
+      a.updateScene({ elements: merged, captureUpdate: CaptureUpdateAction.IMMEDIATELY });
+      toast("Board updated from file");
+    }
+  };
+
+  /** Checks whether the open board's file was changed by another program, and merges it if so. */
+  const syncFromDisk = async (target: Current, a: any) => {
+    const stamp = disk.current.stamp;
+    if (!stamp) return;
+    const file = await boardModified(target.project.handle, target.board);
+    if (file.lastModified === stamp.lastModified) return;
+    const text = await file.text();
+    if (text === stamp.text) disk.current.stamp = { lastModified: file.lastModified, text };
+    else await applyExternal(target, a, text, file.lastModified);
+  };
+
+  const makePreview = async () => {
+    const { api: a, current: target } = live.current;
+    if (!a || !target) return;
+    const elements = a.getSceneElements();
+    const sig = `${target.project.name}/${target.board}:${getSceneVersion(elements)}:${Object.keys(a.getFiles()).length}`;
+    if (!elements.length || sig === preview.current.sig) return;
+    const [x1, y1, x2, y2] = getCommonBounds(elements);
+    const scale = Math.min(2, PREVIEW_MAX_SIDE / Math.max(x2 - x1 + 40, y2 - y1 + 40, 1));
+    const st = a.getAppState();
+    const png = await exportToBlob({
+      elements,
+      appState: { ...st, exportBackground: true, viewBackgroundColor: st.viewBackgroundColor || "#ffffff", exportWithDarkMode: false },
+      files: a.getFiles(),
+      mimeType: "image/png",
+      exportPadding: 20,
+      getDimensions: (w: number, h: number) => ({ width: w * scale, height: h * scale, scale }),
+    });
+    await savePreview(target.project.handle, target.board, png);
+    preview.current.sig = sig;
+  };
+
+  const schedulePreview = () => {
+    clearTimeout(preview.current.timer);
+    preview.current.timer = setTimeout(() => makePreview().catch((e) => console.warn("Preview failed", e)), PREVIEW_DELAY_MS);
+  };
+
   const scheduleSave = useCallback(() => {
     if (!current || !api) return;
-    const { project, board } = current;
+    const target = current;
+    const { project, board } = target;
     setSaveStatus("Unsaved changes…");
-    const job = async () => {
-      try {
-        await saveBoard(project.handle, board, api.getSceneElements(), api.getAppState(), api.getFiles(), save.current.savedFileIds);
-        setSaveStatus("Saved ✓");
-      } catch (e: any) {
-        console.error(e);
-        setSaveStatus("Save failed!");
-        toast(`Save failed: ${e.message ?? e}`);
-      }
-    };
+    const job = () =>
+      serial(async () => {
+        try {
+          // pick up outside edits first, so saving never overwrites them
+          await syncFromDisk(target, api);
+          const elements = api.getSceneElements();
+          disk.current.stamp = await saveBoard(project.handle, board, elements, api.getAppState(), api.getFiles(), save.current.savedFileIds);
+          disk.current.syncedIds = new Set(elements.map((e: any) => e.id));
+          setSaveStatus("Saved ✓");
+          schedulePreview();
+        } catch (e: any) {
+          console.error(e);
+          setSaveStatus("Save failed!");
+          toast(`Save failed: ${e.message ?? e}`);
+        }
+      });
     save.current.pending = job;
     clearTimeout(save.current.timer);
     save.current.timer = setTimeout(() => {
@@ -155,14 +262,52 @@ export default function App() {
     return () => document.removeEventListener("visibilitychange", onHide);
   }, []);
 
+  // live reload: watch the open board's file (and the project list) for changes made outside the app
+  useEffect(() => {
+    if (!current || !api) return;
+    const target = current;
+    let tick = 0;
+    const check = () =>
+      serial(async () => {
+        try {
+          await syncFromDisk(target, api);
+        } catch {
+          /* file briefly missing or being written; try again next tick */
+        }
+        const w = live.current.ws;
+        if (w && ++tick % 2 === 0) {
+          const list = await listProjects(w).catch(() => null);
+          const shape = (l: ProjectInfo[]) => JSON.stringify(l.map((p) => [p.name, p.boards]));
+          if (list && shape(list) !== shape(live.current.projects)) setProjects(list);
+        }
+      });
+    const id = setInterval(check, POLL_MS);
+    window.addEventListener("focus", check);
+    return () => {
+      clearInterval(id);
+      window.removeEventListener("focus", check);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [current, api]);
+
+  // write a preview for a board as soon as it's open (older boards may not have one yet)
+  useEffect(() => {
+    if (api) schedulePreview();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [api]);
+
   // ---------------------------------------------------------------- boards
 
   const openBoard = async (project: ProjectInfo, board: string) => {
     await flushSave();
     try {
-      const data = await loadBoard(project.handle, board);
+      const data = await serial(() => loadBoard(project.handle, board));
+      data.elements = normalize(data.elements);
       save.current.savedFileIds = data.savedFileIds;
       save.current.lastSig = null;
+      disk.current.stamp = data.stamp;
+      disk.current.syncedIds = new Set(data.elements.map((e: any) => e.id));
+      clearTimeout(preview.current.timer);
       const appState: any = { ...data.appState };
       if (appState.scrollX === undefined) {
         // new board: put the origin in the middle of the screen
