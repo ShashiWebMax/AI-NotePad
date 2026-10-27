@@ -1,0 +1,26 @@
+{
+  "name": "sketchnotes",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "postinstall": "node scripts/copy-fonts.mjs",
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "start": "vite build && vite preview --port 5173 --strictPort",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "1.3.0",
+    "@excalidraw/excalidraw": "0.18.1",
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "^18",
+    "@types/react-dom": "^18",
+    "@vitejs/plugin-react": "^4",
+    "typescript": "~5.6",
+    "vite": "^6"
+  }
+}
