@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { listModels } from "../ai/providers";
+import { findLang, isoCode, VOICE_LANGS } from "../voice/languages";
 import { PROVIDER_LABELS, type ImageProvider, type Settings, type TextProvider } from "../settings";
 
 interface Props {
@@ -158,10 +159,22 @@ export function SettingsDialog({ settings, onSave, onClose }: Props) {
                   <option value="gemini">Gemini transcription</option>
                 </select>
               </label>
-              {s.voiceEngine === "browser" && (
+              <label className="field">
+                <span>Language</span>
+                <select
+                  value={findLang(s.voiceLang) ? findLang(s.voiceLang)!.code : "other"}
+                  onChange={(e) => set({ voiceLang: e.target.value === "other" ? "" : e.target.value })}
+                >
+                  {VOICE_LANGS.map((l) => (
+                    <option key={l.code} value={l.code}>{l.label}</option>
+                  ))}
+                  <option value="other">Other…</option>
+                </select>
+              </label>
+              {!findLang(s.voiceLang) && (
                 <label className="field">
-                  <span>Language</span>
-                  <input value={s.voiceLang} onChange={(e) => set({ voiceLang: e.target.value })} placeholder="en-US" />
+                  <span>Language code</span>
+                  <input value={s.voiceLang} onChange={(e) => set({ voiceLang: e.target.value.trim() })} placeholder="e.g. hi-IN" />
                 </label>
               )}
               {s.voiceEngine === "openai" && (
@@ -177,6 +190,12 @@ export function SettingsDialog({ settings, onSave, onClose }: Props) {
                 </label>
               )}
             </div>
+            {isoCode(s.voiceLang) === "si" && (
+              <p className="muted small">
+                සිංහල: the Browser engine needs Chrome or Edge (Safari and Firefox may not recognise Sinhala).
+                OpenAI and Gemini are told to write in Sinhala letters. English words you mix in stay in English.
+              </p>
+            )}
             <label className="check">
               <input type="checkbox" checked={s.voiceAutoSend} onChange={(e) => set({ voiceAutoSend: e.target.checked })} />
               Send to the AI as soon as I stop talking

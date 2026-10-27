@@ -13,7 +13,7 @@
   --warn-soft: #fff9db;
   --user-bubble: #ecebfd;
   --shadow: 0 6px 24px rgba(20, 20, 40, 0.12);
-  font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-family: "SketchNotes Sinhala", Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   color-scheme: light;
 }
 
@@ -100,7 +100,19 @@ button.link { background: none; border: none; color: var(--accent); font-size: 1
   position: absolute; left: 50%; bottom: 76px; transform: translateX(-50%); z-index: 5;
   background: var(--panel); color: var(--text); box-shadow: 0 0 0 1px var(--border), var(--shadow);
   padding: 7px 14px; border-radius: 8px; font-size: 13px; pointer-events: none; white-space: nowrap;
+  display: flex; align-items: center; gap: 10px;
 }
+.voice-hint .lang-switch { pointer-events: auto; }
+
+/* voice language quick switch: a native select laid over a small chip */
+.lang-switch {
+  position: relative; display: inline-flex; align-items: center; flex: none;
+  border: 1px solid var(--border); border-radius: 8px; padding: 6px 9px; font-size: 13px;
+  background: none; color: var(--text); cursor: pointer;
+}
+.lang-switch:hover, .lang-switch:focus-within { background: var(--hover); }
+.lang-switch:focus-within { outline: 2px solid var(--accent); outline-offset: 1px; }
+.lang-switch select { position: absolute; inset: 0; opacity: 0; cursor: pointer; font-size: 14px; }
 .voice-bubble {
   position: fixed; z-index: 50; transform: translate(-4px, calc(-100% - 14px));
   display: flex; align-items: flex-start; gap: 8px; max-width: min(420px, 70vw);
@@ -181,6 +193,7 @@ button.link { background: none; border: none; color: var(--accent); font-size: 1
 .ai-input textarea { resize: vertical; min-height: 64px; max-height: 240px; border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; background: var(--bg); font-size: 13px; line-height: 1.4; }
 .ai-input textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 .ai-buttons { display: flex; justify-content: space-between; gap: 8px; }
+.ai-buttons .voice-group { display: flex; gap: 6px; }
 .mic { border: 1px solid var(--border); background: none; border-radius: 8px; padding: 7px 12px; font-size: 13px; }
 .mic:hover { background: var(--hover); }
 .mic.live { background: var(--danger-soft); color: var(--danger); border-color: var(--danger); animation: pulse 1.2s ease-in-out infinite; }

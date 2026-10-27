@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { insertNote, runAI, type HistoryTurn, type Mode, type Scope } from "../ai/agent";
 import { PROVIDER_LABELS, type Settings } from "../settings";
 import { startVoice, type VoiceSession } from "../voice/voice";
+import { VoiceLangSwitch } from "./VoiceLangSwitch";
 
 interface Entry {
   id: number;
@@ -20,6 +21,7 @@ interface Props {
   boardKey: string | null;
   onSaveNotes: (markdown: string) => void;
   onOpenSettings: () => void;
+  onVoiceLang: (code: string) => void;
   toast: (msg: string) => void;
 }
 
@@ -227,6 +229,7 @@ export function AIPanel(p: Props) {
           rows={3}
         />
         <div className="ai-buttons">
+          <div className="voice-group">
           <button
             className={"mic" + (voice !== "idle" ? " live" : "")}
             onClick={toggleVoice}
@@ -234,6 +237,8 @@ export function AIPanel(p: Props) {
           >
             {voice === "transcribing" ? "…" : "🎙️"} {voice === "listening" ? "Stop" : voice === "transcribing" ? "Transcribing" : "Speak"}
           </button>
+          <VoiceLangSwitch value={p.settings.voiceLang} onChange={p.onVoiceLang} />
+          </div>
           <button className="primary" disabled={!prompt.trim() || !!busy} onClick={() => send(prompt)}>
             {busy ? "Working…" : "Send ↵"}
           </button>

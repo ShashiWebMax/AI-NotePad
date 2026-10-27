@@ -2,6 +2,7 @@
 
 import Anthropic from "@anthropic-ai/sdk";
 import type { ImageProvider, Settings, TextProvider } from "../settings";
+import { isoCode, transcriptionHint } from "../voice/languages";
 
 export interface InputImage {
   mime: string;
@@ -374,15 +375,28 @@ export async function listModels(settings: Settings, provider: TextProvider): Pr
 // ---------------------------------------------------------------- transcription
 
 export async function transcribe(settings: Settings, audio: Blob, engine: "openai" | "gemini"): Promise<string> {
+  const hint = transcriptionHint(settings.voiceLang);
   if (engine === "openai") {
-    const form = new FormData();
-    form.append("model", settings.voiceModelOpenAI);
-    form.append("file", audio, "voice.webm");
-    const res = await fetchRetry("https://api.openai.com/v1/audio/transcriptions", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${need(settings.keys.openai, "OpenAI")}` },
-      body: form,
-    });
+    const send = async (withLanguage: boolean) => {
+      const form = new FormData();
+      form.append("model", settings.voiceModelOpenAI);
+      form.append("file", audio, "voice.webm");
+      // the language code makes the model write in that language's own script (e.g. Sinhala letters)
+      if (withLanguage) form.append("language", isoCode(settings.voiceLang));
+      if (!settings.voiceModelOpenAI.startsWith("whisper")) form.append("prompt", hint);
+      return fetchRetry("https://api.openai.com/v1/audio/transcriptions", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${need(settings.keys.openai, "OpenAI")}` },
+        body: form,
+      });
+    };
+    let res = await send(true);
+    // some models don't accept every language code: try again and rely on the prompt instead
+    if (res.status === 400) {
+      const err = await readError(res);
+      if (!/language/i.test(err.message)) throw err;
+      res = await send(false);
+    }
     if (!res.ok) throw await readError(res);
     return ((await res.json()).text ?? "").trim();
   }
@@ -395,7 +409,7 @@ export async function transcribe(settings: Settings, audio: Blob, engine: "opena
   const text = await chat(
     { ...settings, textModels: { ...settings.textModels, gemini: settings.voiceModelGemini || saved } },
     {
-      system: "You transcribe audio. Output only the exact words spoken, nothing else.",
+      system: `You transcribe audio. Output only the exact words spoken, nothing else. ${hint}`,
       text: "Transcribe this voice note.",
       images: [{ mime: audio.type.split(";")[0] || "audio/webm", b64 }],
     },

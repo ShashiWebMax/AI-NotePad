@@ -23,6 +23,7 @@ There is **no backend**:
 - [Drawing](#drawing)
 - [AI assistant](#ai-assistant)
 - [Voice prompts](#voice-prompts)
+- [Sinhala (සිංහල)](#sinhala-සිංහල)
 - [Use with Claude Code](#use-with-claude-code)
 - [Keyboard shortcuts](#keyboard-shortcuts)
 - [Where your files go](#where-your-files-go)
@@ -51,6 +52,8 @@ There is **no backend**:
 - **Voice mode.** Click 🎙️ or press Ctrl+Shift+Space, speak, and the request is sent when you stop
   talking.
 - **🎤 Voice text.** Hold down on the board, speak, and let go. What you said is typed there as text.
+- **Sinhala (සිංහල).** Speak in Sinhala and get Sinhala letters. Sinhala text on the board is drawn
+  in a matching Sinhala font for each font style.
 - **Projects and boards.** You get one folder per client or app, and one board per call. Everything
   saves automatically. Boards can be renamed and deleted from the sidebar.
 - **Export.** Download a board, or just the selection, as PDF, PNG or SVG with the **⤓ Export**
@@ -361,9 +364,46 @@ Voice engines (Settings → Voice prompts):
 
 | Engine | Notes |
 |---|---|
-| Browser | Free, with live captions. Chrome sends the audio to Google for recognition. Set the language, e.g. `en-US` or `en-GB`. |
+| Browser | Free, with live captions. Chrome sends the audio to Google for recognition. |
 | OpenAI transcription | Needs an OpenAI key. Very accurate (`gpt-4o-transcribe`). |
 | Gemini transcription | Needs a Gemini key. |
+
+**Language.** Pick it in Settings → Voice prompts: English (US, UK, India), Sinhala, Tamil, or any
+other language code. The small language switch next to **Speak** and in the 🎤 voice text hint
+changes it in one click, which is handy when a call moves between English and Sinhala.
+
+## Sinhala (සිංහල)
+
+**Voice.** Choose **සිං** on the language switch, or **සිංහල — Sinhala** in Settings. Then:
+
+- **Browser engine:** works in Chrome and Edge, with live captions. Safari and Firefox may not
+  recognise Sinhala; use OpenAI or Gemini there.
+- **OpenAI:** gets the language code `si` and is asked to write in Sinhala letters.
+- **Gemini:** is asked to write in Sinhala letters, not romanised.
+
+All three keep English words you mix in as English.
+
+**Fonts.** When text contains Sinhala, each font style uses a matching Sinhala font for the Sinhala
+letters. Latin letters keep the style's own font.
+
+| Font style | Sinhala font |
+|---|---|
+| Hand-drawn (Excalifont, Virgil) | Yaldevi, the most informal one |
+| Normal (Nunito, Liberation Sans) | Noto Sans Sinhala |
+| Code (Comic Shanns, Cascadia) | Noto Sans Sinhala (there is no monospaced Sinhala font) |
+| Lilita One | Gemunu Libre Bold |
+| Helvetica | your computer's own Sinhala font |
+| The app's buttons, notes and AI panel | Noto Sans Sinhala |
+
+- **Downloads:** each font is 26–51 KB and comes with the app. It is only downloaded when Sinhala
+  text appears.
+- **Sizing:** text that was measured before its font arrived is measured again, so boxes fit
+  their labels.
+- **Exports:** PNG and PDF exports use the same fonts. SVG exports embed them, so the file looks
+  the same on other computers.
+
+The fonts are open source (SIL Open Font License), from
+[Fontsource](https://fontsource.org).
 
 ---
 
@@ -485,6 +525,7 @@ SketchNotes/                     <- the folder you picked
 | AI is slow | Click **Cancel**, set **Thinking effort** to Low, or pick a faster model (e.g. `gemini-3.5-flash`). |
 | Image mode fails with a Claude key only | Claude doesn't generate images. Add a Gemini (paid), OpenAI or OpenRouter key and select it under Image generation. |
 | Voice doesn't start | Allow the microphone for `localhost` in the browser's site settings. In Safari/Firefox, switch the voice engine to OpenAI or Gemini. |
+| Sinhala speech comes out in English or romanised | Check that the language switch next to **Speak** shows **සිං**. With the Browser engine, use Chrome or Edge. |
 | `docker compose` fails to connect | Start Docker Desktop first. |
 
 ---
@@ -527,6 +568,8 @@ src/
   ai/providers.ts          Claude / OpenAI / Gemini / OpenRouter calls (chat, images, model lists, speech)
   ai/agent.ts              board snapshot -> prompt -> JSON edits -> applied to the canvas
   voice/voice.ts           voice capture + silence detection
+  voice/languages.ts       voice languages and transcription hints
+  fonts/sinhala.ts         Sinhala fonts per font style, text re-measuring, SVG font embedding
   export/                  PDF / PNG / SVG export (pdf.ts writes the PDF, no library)
   components/              sidebar, AI panel, settings dialog, pen bar, export menu
   styles.css               theme and layout

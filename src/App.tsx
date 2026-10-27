@@ -12,8 +12,10 @@ import {
 } from "@excalidraw/excalidraw";
 import { AIPanel } from "./components/AIPanel";
 import { ExportMenu } from "./components/ExportMenu";
+import { VoiceLangSwitch } from "./components/VoiceLangSwitch";
 import { PenBar, VOICE_TOOL, type Preset, type PresetId } from "./components/PenBar";
-import { toElements } from "./scene";
+import { bump, toElements } from "./scene";
+import { anySinhalaFontLoaded, hasSinhala, isSinhalaFace, loadSinhalaFonts, sinhalaFontsReady } from "./fonts/sinhala";
 import { startVoice, type VoiceSession } from "./voice/voice";
 import { SettingsDialog } from "./components/SettingsDialog";
 import { Sidebar } from "./components/Sidebar";
@@ -471,9 +473,11 @@ export default function App() {
     let placed = false;
     vt.session = startVoice(settingsRef.current, {
       onInterim: (text) => setVoiceBubble((b) => b && { ...b, text }),
-      onFinal: (text) => {
+      onFinal: async (text) => {
         if (vt.cancelled || !text.trim()) return;
         placed = true;
+        // measure Sinhala with its real font, not a stand-in
+        if (hasSinhala(text)) await loadSinhalaFonts();
         placeVoiceText(origin, text.trim());
       },
       onError: (msg) => toast(msg),
@@ -503,6 +507,56 @@ export default function App() {
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
   }, [voiceBubble]);
+
+  // Sinhala text measured before its font arrived is slightly the wrong size: measure it again once the font is in
+  useEffect(() => {
+    if (!api) return;
+    const remeasure = () => {
+      const all = api.getSceneElementsIncludingDeleted() as any[];
+      const editing = api.getAppState().editingTextElement?.id;
+      const isTarget = (e: any) => e.type === "text" && !e.isDeleted && e.id !== editing && hasSinhala(e.originalText ?? e.text);
+      if (!all.some(isTarget)) return;
+      const fresh = new Map((restoreElements(all, null, { refreshDimensions: true, repairBindings: true }) as any[]).map((e) => [e.id, e]));
+      const byId = new Map(all.map((e) => [e.id, e]));
+      const grow = new Map<string, number>(); // container id → new height
+      let changed = false;
+      let next = all.map((e) => {
+        const f = fresh.get(e.id);
+        if (!f || !isTarget(e)) return e;
+        if (Math.abs(f.width - e.width) < 0.5 && Math.abs(f.height - e.height) < 0.5 && f.text === e.text) return e;
+        changed = true;
+        let { x, y } = f;
+        const box = e.containerId ? byId.get(e.containerId) : null;
+        if (box) {
+          // keep a shape's label centred, and make the shape taller if the label no longer fits
+          const pad = 5;
+          const h = Math.max(box.height, f.height + pad * 2);
+          if (h > box.height) grow.set(box.id, h);
+          if (e.verticalAlign === "middle") y = box.y + (h - f.height) / 2;
+        }
+        return bump(e, { width: f.width, height: f.height, text: f.text, x, y });
+      });
+      if (grow.size) next = next.map((e) => (grow.has(e.id) ? bump(e, { height: grow.get(e.id) }) : e));
+      if (changed) api.updateScene({ elements: next, captureUpdate: CaptureUpdateAction.NEVER });
+    };
+    const onDone = (ev: any) => {
+      if ([...(ev.fontfaces ?? [])].some(isSinhalaFace)) remeasure();
+    };
+    // typing Sinhala starts the font download straight away, so the text editor measures with the right font
+    const onInput = (ev: Event) => {
+      const t = ev.target as HTMLTextAreaElement | HTMLInputElement | null;
+      if (!sinhalaFontsReady() && t && "value" in t && hasSinhala(t.value)) loadSinhalaFonts();
+    };
+    document.fonts.addEventListener("loadingdone", onDone);
+    document.addEventListener("input", onInput, true);
+    // the board's fonts may have arrived before the canvas was ready
+    if (anySinhalaFontLoaded()) remeasure();
+    document.fonts.ready.then(() => { if (live.current.api === api && anySinhalaFontLoaded()) remeasure(); });
+    return () => {
+      document.fonts.removeEventListener("loadingdone", onDone);
+      document.removeEventListener("input", onInput, true);
+    };
+  }, [api]);
 
   const onPointerDown = (activeTool: any, pointerDownState: any) => {
     if (isVoiceTool(activeTool)) startVoiceText(pointerDownState.origin);
@@ -555,6 +609,9 @@ export default function App() {
     setSettings(s);
     saveSettings(s);
   };
+
+  // quick switch next to the voice buttons; starts from the saved copy so no other setting is lost
+  const setVoiceLang = (code: string) => updateSettings({ ...loadSettings(), voiceLang: code });
 
   // ---------------------------------------------------------------- render
 
@@ -630,7 +687,10 @@ export default function App() {
               onToggleRecognition={() => updateSettings({ ...settings, recognition: !settings.recognition })}
             />
             {voiceToolOn && !voiceBubble && (
-              <div className="voice-hint">🎤 Hold down where the text should go, speak, then let go.</div>
+              <div className="voice-hint">
+                <span>🎤 Hold down where the text should go, speak, then let go.</span>
+                <VoiceLangSwitch value={settings.voiceLang} onChange={setVoiceLang} />
+              </div>
             )}
             {voiceBubble && (
               <div className="voice-bubble" style={{ left: voiceBubble.x, top: voiceBubble.y }}>
@@ -661,6 +721,7 @@ export default function App() {
         boardKey={current ? `${current.project.name}/${current.board}/${boardKey}` : null}
         onSaveNotes={onSaveNotes}
         onOpenSettings={openSettings}
+        onVoiceLang={setVoiceLang}
         toast={toast}
       />
 

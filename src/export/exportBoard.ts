@@ -2,6 +2,7 @@
 
 import { exportToBlob, exportToSvg, getCommonBounds } from "@excalidraw/excalidraw";
 import { jpegToPdf } from "./pdf";
+import { embedSinhalaInSvg } from "../fonts/sinhala";
 
 export type ExportFormat = "pdf" | "png" | "svg";
 
@@ -48,6 +49,7 @@ export async function exportBoard(api: any, board: string, format: ExportFormat,
 
   if (format === "svg") {
     const svg = await exportToSvg({ elements, appState, files, exportPadding: PADDING });
+    await embedSinhalaInSvg(svg);
     download(new Blob([svg.outerHTML], { type: "image/svg+xml" }), `${name}.svg`);
     return `${name}.svg`;
   }
