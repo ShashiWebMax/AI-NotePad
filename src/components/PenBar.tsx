@@ -1,12 +1,15 @@
 // Quick drawing presets shown at the bottom of the canvas.
 
-export type PresetId = "pen" | "marker" | "pencil" | "highlighter" | "box" | "text" | "arrow";
+export type PresetId = "pen" | "marker" | "pencil" | "highlighter" | "box" | "text" | "voice" | "arrow";
+
+/** Excalidraw custom tool used for hold-to-talk voice text. */
+export const VOICE_TOOL = "voice-text";
 
 export interface Preset {
   id: PresetId;
   label: string;
   icon: string;
-  tool: "freedraw" | "rectangle" | "text" | "arrow";
+  tool: "freedraw" | "rectangle" | "text" | "arrow" | "custom";
   temporary?: boolean; // restore normal styles once the user switches tool
   props?: Record<string, any>;
 }
@@ -28,6 +31,7 @@ export const PRESETS: Preset[] = [
   },
   { id: "arrow", label: "Arrow / connector", icon: "↗", tool: "arrow" },
   { id: "text", label: "Text", icon: "T", tool: "text" },
+  { id: "voice", label: "Voice text: hold down where the text should go, speak, then let go", icon: "🎤", tool: "custom" },
 ];
 
 interface Props {

@@ -578,7 +578,7 @@ function describe(doc, p) {
   const kindById = new Map([...markups, ...notes, ...nodes, ...sketches].map((x) => [x.id, x]));
   const oneLine = (s) => String(s).replace(/\n/g, " / ");
   const nameOf = (x) => {
-    if (!x) return null;
+    if (!x || x.type === "image") return null; // for screenshots, say where on the image instead
     const k = kindById.get(x.id);
     const txt = k?.text ?? k?.label ?? textOf(x);
     return `${k?.kind ?? x.type}${txt ? ` "${oneLine(txt)}"` : ""} [${x.id}]`;

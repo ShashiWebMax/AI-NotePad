@@ -50,8 +50,11 @@ There is **no backend**:
   places it next to the original.
 - **Voice mode.** Click 🎙️ or press Ctrl+Shift+Space, speak, and the request is sent when you stop
   talking.
+- **🎤 Voice text.** Hold down on the board, speak, and let go. What you said is typed there as text.
 - **Projects and boards.** You get one folder per client or app, and one board per call. Everything
-  saves automatically.
+  saves automatically. Boards can be renamed and deleted from the sidebar.
+- **Export.** Download a board, or just the selection, as PDF, PNG or SVG with the **⤓ Export**
+  button.
 - **Standard file format.** Boards are Excalidraw files, so they also open at
   [excalidraw.com](https://excalidraw.com).
 
@@ -216,6 +219,8 @@ npx vite preview --port 5180
    - In Safari or Firefox, click **Use browser storage instead**.
 2. **Create a project** (for example the client's or app's name). It comes with a first board. Use
    **＋** next to a project to add more boards, and double-click a board's name to rename it.
+   To delete a board, hover over it and click **🗑**. Deleted boards are moved to a hidden `.trash`
+   folder inside the project, so you can still get them back from Finder.
 3. **Add an AI key (optional).**
    - Click **⚙︎ Settings** at the bottom left, or **AI & voice settings** in the ☰ menu, and paste
      one or more keys. Each field has a *get key ↗* link.
@@ -259,6 +264,8 @@ You can type any other model name into the Model field.
    - "Generate a mockup of this screen with the darker header and bigger checkout button."
 5. Save the notes. Use **Save .md** on an AI answer to write it to the project's `exports/` folder,
    or **Put on board** to keep it next to the screenshots.
+6. Share the board. Click **⤓ Export** (top right) and choose **PDF**, **PNG image** or
+   **SVG image**. If something is selected, you can tick **Only the selected items**.
 
 ---
 
@@ -280,6 +287,7 @@ The **bottom bar** adds quick presets:
 | Highlight box | A see-through filled rectangle over an area |
 | Arrow | Connector that sticks to shapes and images |
 | Text | Click anywhere and type |
+| 🎤 Voice text | Press and hold where the text should go and speak. A live caption follows your words, and the text is placed there when you let go. Esc cancels. It uses the voice engine chosen in Settings. |
 
 ### ✨ Auto-shapes
 
@@ -411,7 +419,7 @@ node ~/.claude/skills/sketchnotes/scripts/sketchnotes.mjs list
 |---|---|
 | ⌘V / Ctrl+V | Paste an image or text onto the board |
 | Ctrl+Shift+Space | Start or stop a voice prompt |
-| Esc | Cancel voice recording |
+| Esc | Cancel voice recording or voice text |
 | Enter / Shift+Enter | Send prompt / new line (AI panel) |
 | ⌘Z / Ctrl+Z | Undo (including AI changes and auto-shapes) |
 | Space + drag, or scroll | Pan the canvas |
@@ -519,7 +527,8 @@ src/
   ai/providers.ts          Claude / OpenAI / Gemini / OpenRouter calls (chat, images, model lists, speech)
   ai/agent.ts              board snapshot -> prompt -> JSON edits -> applied to the canvas
   voice/voice.ts           voice capture + silence detection
-  components/              sidebar, AI panel, settings dialog, pen bar
+  export/                  PDF / PNG / SVG export (pdf.ts writes the PDF, no library)
+  components/              sidebar, AI panel, settings dialog, pen bar, export menu
   styles.css               theme and layout
 Dockerfile, docker-compose.yml   static build served by nginx on 127.0.0.1:8080
 .github/workflows/deploy-pages.yml  builds and publishes to GitHub Pages on push to main

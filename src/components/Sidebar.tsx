@@ -18,6 +18,7 @@ interface Props {
   onNewBoard: (project: ProjectInfo) => void;
   onOpenBoard: (project: ProjectInfo, board: string) => void;
   onRenameBoard: (project: ProjectInfo, board: string) => void;
+  onDeleteBoard: (project: ProjectInfo, board: string) => void;
   onOpenSettings: () => void;
 }
 
@@ -86,15 +87,24 @@ export function Sidebar(p: Props) {
                         proj.boards.map((b) => {
                           const active = p.current?.project === proj.name && p.current?.board === b;
                           return (
-                            <button
-                              key={b}
-                              className={"board" + (active ? " active" : "")}
-                              onClick={() => p.onOpenBoard(proj, b)}
-                              onDoubleClick={() => p.onRenameBoard(proj, b)}
-                              title="Double-click to rename"
-                            >
-                              {b}
-                            </button>
+                            <div key={b} className={"board-row" + (active ? " active" : "")}>
+                              <button
+                                className={"board" + (active ? " active" : "")}
+                                onClick={() => p.onOpenBoard(proj, b)}
+                                onDoubleClick={() => p.onRenameBoard(proj, b)}
+                                title="Double-click to rename"
+                              >
+                                {b}
+                              </button>
+                              <button
+                                className="board-delete"
+                                title={`Delete "${b}"`}
+                                aria-label={`Delete board ${b}`}
+                                onClick={() => p.onDeleteBoard(proj, b)}
+                              >
+                                🗑
+                              </button>
+                            </div>
                           );
                         })}
                     </div>

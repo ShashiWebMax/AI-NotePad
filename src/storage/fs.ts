@@ -157,6 +157,23 @@ export async function renameBoard(project: Dir, from: string, to: string): Promi
   return target;
 }
 
+/**
+ * Deletes a board by moving it to <project>/.trash/, so it can still be recovered by hand.
+ * Its preview is removed; images in files/ are kept, since the trashed board still uses them.
+ */
+export async function deleteBoard(project: Dir, board: string) {
+  const text = await readText(project, board + BOARD_EXT);
+  const trash = await project.getDirectoryHandle(".trash", { create: true });
+  const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+  await writeText(trash, `${board} ${stamp}${BOARD_EXT}`, text);
+  await project.removeEntry(board + BOARD_EXT);
+  try {
+    await project.removeEntry(board + PREVIEW_EXT);
+  } catch {
+    /* no preview */
+  }
+}
+
 function emptyBoard() {
   return { type: "excalidraw", version: 2, source: "sketchnotes", elements: [], appState: {}, files: {}, fileIndex: {} };
 }

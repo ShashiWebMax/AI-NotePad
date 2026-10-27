@@ -17,12 +17,18 @@ export interface VoiceSession {
 }
 
 const SILENCE_MS = 2200;
+const MAX_MS = 120000;
 
-export function startVoice(settings: Settings, h: VoiceHandlers): VoiceSession {
-  return settings.voiceEngine === "browser" ? browserVoice(settings, h) : recordedVoice(settings, h);
+export interface VoiceOptions {
+  /** Hold-to-talk: keep listening until stop() is called, instead of stopping after a pause. */
+  hold?: boolean;
 }
 
-function browserVoice(settings: Settings, h: VoiceHandlers): VoiceSession {
+export function startVoice(settings: Settings, h: VoiceHandlers, opts: VoiceOptions = {}): VoiceSession {
+  return settings.voiceEngine === "browser" ? browserVoice(settings, h, opts) : recordedVoice(settings, h, opts);
+}
+
+function browserVoice(settings: Settings, h: VoiceHandlers, opts: VoiceOptions): VoiceSession {
   const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
   if (!SR) {
     h.onError("This browser has no built-in speech recognition. Pick OpenAI or Gemini as the voice engine in Settings.");
@@ -34,11 +40,12 @@ function browserVoice(settings: Settings, h: VoiceHandlers): VoiceSession {
   rec.continuous = true;
   rec.interimResults = true;
   let finalText = "";
+  let lastInterim = "";
   let cancelled = false;
   let timer: number | undefined;
   const arm = () => {
     clearTimeout(timer);
-    timer = window.setTimeout(() => rec.stop(), SILENCE_MS);
+    timer = window.setTimeout(() => rec.stop(), opts.hold ? MAX_MS : SILENCE_MS);
   };
   rec.onresult = (ev: any) => {
     let interim = "";
@@ -47,6 +54,7 @@ function browserVoice(settings: Settings, h: VoiceHandlers): VoiceSession {
       if (r.isFinal) finalText += r[0].transcript + " ";
       else interim += r[0].transcript;
     }
+    lastInterim = interim;
     h.onInterim((finalText + interim).trim());
     arm();
   };
@@ -57,19 +65,22 @@ function browserVoice(settings: Settings, h: VoiceHandlers): VoiceSession {
   rec.onend = () => {
     clearTimeout(timer);
     h.onState("idle");
-    if (!cancelled && finalText.trim()) h.onFinal(finalText.trim());
+    // words still being recognised when the user let go count too
+    const text = (finalText + lastInterim).trim();
+    if (!cancelled && text) h.onFinal(text);
   };
   rec.start();
   h.onState("listening");
-  timer = window.setTimeout(() => rec.stop(), 8000); // stop if nothing is said
+  timer = window.setTimeout(() => rec.stop(), opts.hold ? MAX_MS : 8000); // stop if nothing is said
   return {
     stop: () => rec.stop(),
     cancel: () => { cancelled = true; rec.abort(); },
   };
 }
 
-function recordedVoice(settings: Settings, h: VoiceHandlers): VoiceSession {
+function recordedVoice(settings: Settings, h: VoiceHandlers, opts: VoiceOptions): VoiceSession {
   let cancelled = false;
+  let stopRequested = false;
   let recorder: MediaRecorder | null = null;
   let stream: MediaStream | null = null;
   let audioCtx: AudioContext | null = null;
@@ -107,7 +118,12 @@ function recordedVoice(settings: Settings, h: VoiceHandlers): VoiceSession {
     };
     recorder.start();
     h.onState("listening");
-    h.onInterim("Listening… (stops after a short pause)");
+    h.onInterim(opts.hold ? "Listening… release to finish" : "Listening… (stops after a short pause)");
+    // the user may have let go while the microphone permission prompt was open
+    if (stopRequested || cancelled) {
+      recorder.stop();
+      return;
+    }
 
     // simple silence detection
     audioCtx = new AudioContext();
@@ -126,7 +142,8 @@ function recordedVoice(settings: Settings, h: VoiceHandlers): VoiceSession {
       const now = performance.now();
       if (rms > 0.035) { lastLoud = now; spoke = true; }
       const quietFor = now - lastLoud;
-      if ((spoke && quietFor > SILENCE_MS) || (!spoke && now - startedAt > 8000) || now - startedAt > 120000) {
+      const autoStop = !opts.hold && ((spoke && quietFor > SILENCE_MS) || (!spoke && now - startedAt > 8000));
+      if (autoStop || now - startedAt > MAX_MS) {
         if (recorder?.state === "recording") recorder.stop();
         return;
       }
@@ -136,7 +153,10 @@ function recordedVoice(settings: Settings, h: VoiceHandlers): VoiceSession {
   })();
 
   return {
-    stop: () => { if (recorder?.state === "recording") recorder.stop(); },
+    stop: () => {
+      stopRequested = true;
+      if (recorder?.state === "recording") recorder.stop();
+    },
     cancel: () => {
       cancelled = true;
       if (recorder?.state === "recording") recorder.stop();

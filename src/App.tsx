@@ -8,9 +8,13 @@ import {
   getCommonBounds,
   getSceneVersion,
   restoreElements,
+  sceneCoordsToViewportCoords,
 } from "@excalidraw/excalidraw";
 import { AIPanel } from "./components/AIPanel";
-import { PenBar, type Preset, type PresetId } from "./components/PenBar";
+import { ExportMenu } from "./components/ExportMenu";
+import { PenBar, VOICE_TOOL, type Preset, type PresetId } from "./components/PenBar";
+import { toElements } from "./scene";
+import { startVoice, type VoiceSession } from "./voice/voice";
 import { SettingsDialog } from "./components/SettingsDialog";
 import { Sidebar } from "./components/Sidebar";
 import { handleStrokeEnd } from "./recognize/recognition";
@@ -19,6 +23,7 @@ import {
   boardModified,
   createBoard,
   createProject,
+  deleteBoard,
   listProjects,
   loadBoard,
   loadFiles,
@@ -80,6 +85,10 @@ export default function App() {
   const [boardKey, setBoardKey] = useState(0);
   const [saveStatus, setSaveStatus] = useState("");
   const [activePreset, setActivePreset] = useState<PresetId | null>(null);
+  const [voiceToolOn, setVoiceToolOn] = useState(false);
+  // live caption bubble while holding down with the voice text tool (viewport coords)
+  const [voiceBubble, setVoiceBubble] = useState<{ x: number; y: number; text: string; state: "listening" | "transcribing" } | null>(null);
+  const voiceText = useRef<{ session: VoiceSession | null; cancelled: boolean }>({ session: null, cancelled: false });
 
   if (import.meta.env.DEV) (window as any).__sketchApi = api; // handy for debugging in the console
 
@@ -360,6 +369,33 @@ export default function App() {
     }
   };
 
+  const onDeleteBoard = async (project: ProjectInfo, board: string) => {
+    if (!window.confirm(`Delete the board "${board}"?\n\nIt's moved to the hidden .trash folder inside "${project.name}", so you can still get it back from there.`)) return;
+    const isCurrent = current?.project.name === project.name && current.board === board;
+    try {
+      if (isCurrent) {
+        await flushSave();
+        clearTimeout(preview.current.timer);
+        setCurrent(null); // stop autosave and live reload for this board before its file goes away
+        setInitialData(null);
+      }
+      await serial(() => deleteBoard(project.handle, board));
+      toast(`Deleted "${board}"`);
+      let list = await refresh();
+      if (!isCurrent) return;
+      let proj = list.find((p) => p.name === project.name);
+      if (proj && !proj.boards.length) {
+        await createBoard(proj.handle, "Board 1");
+        list = await refresh();
+        proj = list.find((p) => p.name === project.name);
+      }
+      if (proj?.boards[0]) await openBoard(proj, proj.boards[0]);
+    } catch (e: any) {
+      toast(`Could not delete: ${e.message ?? e}`);
+      refresh();
+    }
+  };
+
   const onSaveNotes = async (md: string) => {
     if (!current) return;
     const d = new Date();
@@ -377,6 +413,8 @@ export default function App() {
 
   const onChange = (elements: readonly any[], appState: any, files: any) => {
     document.documentElement.dataset.theme = appState.theme;
+    const voiceOn = appState.activeTool?.type === "custom" && appState.activeTool.customType === VOICE_TOOL;
+    if (voiceOn !== voiceToolOn) setVoiceToolOn(voiceOn);
 
     // end a temporary preset (highlighter / highlight box) once the user switches tool
     const t = tempPreset.current;
@@ -398,12 +436,94 @@ export default function App() {
     }
   };
 
+  // ---------------------------------------------------------------- voice text tool (hold to talk)
+
+  const isVoiceTool = (t: any) => t?.type === "custom" && t.customType === VOICE_TOOL;
+
+  const placeVoiceText = (origin: { x: number; y: number }, text: string) => {
+    const a = live.current.api;
+    if (!a) return;
+    const st = a.getAppState();
+    const fontSize = st.currentItemFontSize ?? 20;
+    const els = toElements([{
+      type: "text",
+      x: origin.x,
+      y: origin.y - (fontSize * 1.25) / 2, // centre the first line on the point, like the Text tool
+      text,
+      fontSize,
+      fontFamily: st.currentItemFontFamily,
+      strokeColor: st.currentItemStrokeColor,
+      textAlign: st.currentItemTextAlign,
+    }]);
+    a.updateScene({
+      elements: [...a.getSceneElementsIncludingDeleted(), ...els],
+      appState: { selectedElementIds: { [els[0].id]: true } }, // ready to move or edit, like after typing
+      captureUpdate: CaptureUpdateAction.IMMEDIATELY,
+    });
+  };
+
+  const startVoiceText = (origin: { x: number; y: number }) => {
+    const vt = voiceText.current;
+    if (vt.session || !api) return;
+    const vp = sceneCoordsToViewportCoords({ sceneX: origin.x, sceneY: origin.y }, api.getAppState());
+    setVoiceBubble({ x: vp.x, y: vp.y, text: "", state: "listening" });
+    vt.cancelled = false;
+    let placed = false;
+    vt.session = startVoice(settingsRef.current, {
+      onInterim: (text) => setVoiceBubble((b) => b && { ...b, text }),
+      onFinal: (text) => {
+        if (vt.cancelled || !text.trim()) return;
+        placed = true;
+        placeVoiceText(origin, text.trim());
+      },
+      onError: (msg) => toast(msg),
+      onState: (s) => {
+        if (s === "transcribing") setVoiceBubble((b) => b && { ...b, state: "transcribing", text: "Transcribing…" });
+        if (s === "idle") {
+          vt.session = null;
+          setVoiceBubble(null);
+          // onFinal can arrive just after "idle" (browser engine), so check a moment later
+          setTimeout(() => { if (!placed && !vt.cancelled) toast("Didn't catch any words. Hold down while you speak, then let go."); }, 50);
+        }
+      },
+    }, { hold: true });
+  };
+
+  const stopVoiceText = () => voiceText.current.session?.stop();
+
+  // Esc cancels a voice text recording
+  useEffect(() => {
+    if (!voiceBubble) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      voiceText.current.cancelled = true;
+      voiceText.current.session?.cancel();
+      setVoiceBubble(null);
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [voiceBubble]);
+
+  const onPointerDown = (activeTool: any, pointerDownState: any) => {
+    if (isVoiceTool(activeTool)) startVoiceText(pointerDownState.origin);
+  };
+
   const onPointerUp = (activeTool: any) => {
+    if (isVoiceTool(activeTool)) return stopVoiceText();
     if (activeTool?.type === "freedraw" && settingsRef.current.recognition && api) handleStrokeEnd(api);
   };
 
   const pickPreset = (p: Preset) => {
     if (!api) return;
+    if (p.tool === "custom") {
+      if (tempPreset.current) {
+        api.updateScene({ appState: tempPreset.current.restore });
+        tempPreset.current = null;
+      }
+      api.setActiveTool({ type: "custom", customType: VOICE_TOOL });
+      setActivePreset(p.id);
+      return;
+    }
     const st = api.getAppState();
     if (p.temporary) {
       const restore = tempPreset.current?.restore ?? Object.fromEntries(STYLE_KEYS.map((k) => [k, st[k]]));
@@ -456,10 +576,11 @@ export default function App() {
         onNewBoard={onNewBoard}
         onOpenBoard={openBoard}
         onRenameBoard={onRenameBoard}
+        onDeleteBoard={onDeleteBoard}
         onOpenSettings={openSettings}
       />
 
-      <main className="canvas-wrap">
+      <main className={"canvas-wrap" + (voiceToolOn ? " voice-tool" : "")}>
         {current && initialData ? (
           <>
             <Excalidraw
@@ -467,11 +588,13 @@ export default function App() {
               initialData={initialData}
               excalidrawAPI={setApi}
               onChange={onChange}
+              onPointerDown={onPointerDown}
               onPointerUp={onPointerUp}
               name={current.board}
               UIOptions={{ canvasActions: { saveToActiveFile: false, loadScene: false } }}
               renderTopRightUI={() => (
                 <div className="top-right">
+                  <ExportMenu api={api} board={current.board} toast={toast} />
                   <button className="tr-btn" title="Voice prompt (Ctrl+Shift+Space)" onClick={() => window.dispatchEvent(new Event("sketchnotes:voice"))}>🎙️</button>
                   {!aiOpen && <button className="tr-btn ai" onClick={() => setAiOpen(true)}>✨ AI</button>}
                 </div>
@@ -501,11 +624,22 @@ export default function App() {
               </WelcomeScreen>
             </Excalidraw>
             <PenBar
-              active={activePreset}
+              active={voiceToolOn ? "voice" : activePreset === "voice" ? null : activePreset}
               onPick={pickPreset}
               recognition={settings.recognition}
               onToggleRecognition={() => updateSettings({ ...settings, recognition: !settings.recognition })}
             />
+            {voiceToolOn && !voiceBubble && (
+              <div className="voice-hint">🎤 Hold down where the text should go, speak, then let go.</div>
+            )}
+            {voiceBubble && (
+              <div className="voice-bubble" style={{ left: voiceBubble.x, top: voiceBubble.y }}>
+                <span className={"voice-dot" + (voiceBubble.state === "listening" ? " live" : "")} />
+                <span className={voiceBubble.text ? "" : "muted"}>
+                  {voiceBubble.text || "Listening… let go to place the text"}
+                </span>
+              </div>
+            )}
           </>
         ) : (
           <div className="placeholder">
