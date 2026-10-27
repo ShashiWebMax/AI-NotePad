@@ -126,10 +126,67 @@ To stop it:
 docker compose down
 ```
 
+### GitHub Pages
+
+The repo includes a workflow, [.github/workflows/deploy-pages.yml](.github/workflows/deploy-pages.yml),
+that builds the app and publishes it on every push to `main`. The site appears at
+`https://<username>.github.io/<repo>/`.
+
+One-time setup:
+
+1. Create a repository on GitHub. On a free plan it must be **public** to use Pages. The code
+   contains no keys or secrets.
+2. Push this project to its `main` branch.
+
+   ```bash
+   git init -b main
+   ```
+
+   ```bash
+   git add . && git commit -m "Initial commit"
+   ```
+
+   ```bash
+   git remote add origin https://github.com/<username>/<repo>.git
+   ```
+
+   ```bash
+   git push -u origin main
+   ```
+
+3. On GitHub, open the repo's **Settings → Pages** and set **Source** to **GitHub Actions**.
+4. Open the **Actions** tab. If the first run failed because Pages wasn't enabled yet, re-run
+   **Deploy to GitHub Pages**. When it finishes, the site link appears in the run summary.
+
+After that, every push to `main` redeploys automatically. The workflow reads the sub-path
+(`/<repo>/`) from GitHub, so renaming the repo or adding a custom domain needs no code change.
+
+**How it works on Pages:**
+- **Folder saving and the microphone work**, because GitHub Pages serves over HTTPS.
+- **API keys are never in the repo.** Each person who opens the site pastes their own keys in
+  Settings, and they stay in that browser.
+- **Boards are separate.** Boards and keys saved on the hosted site are kept apart from the ones
+  on `localhost`. To use an existing projects folder, open it on the hosted site too.
+- **Your sites share browser storage.** All project sites on one account share the origin
+  `<username>.github.io`, and therefore its browser storage. Any other Pages site you publish on
+  that account could read keys saved by SketchNotes. To avoid this:
+  - give SketchNotes its own origin with a custom domain (repo **Settings → Pages → Custom
+    domain**), or
+  - host `dist/` on Netlify, Vercel or Cloudflare Pages instead.
+
+  Either way, use keys with spending limits.
+
+To build for a sub-path yourself, for example to test locally:
+
+```bash
+BASE_PATH=/sketchnotes/ npm run build
+```
+
 ### Any static web server
 
 `npm run build` writes the finished app to `dist/`. Any static file server can serve that folder.
-Keep it on `localhost`; see [Privacy and security](#privacy-and-security).
+Set `BASE_PATH` when it isn't served from the root of the domain. Use HTTPS (or `localhost`) so
+folder saving and the microphone work.
 
 ```bash
 npm run build
@@ -347,8 +404,11 @@ SketchNotes/                     <- the folder you picked
   - Use keys with spending limits, and revoke any key you've shared.
 - **What reaches the AI provider:** only what you send — the snapshot of the selection or screen,
   the board's text and your prompt.
-- **Run it only on `localhost`.** Don't host it publicly; it is designed for a single user on their
-  own machine. The Docker setup binds to `127.0.0.1` for this reason.
+- **Where to run it.** On `localhost`, keys and boards never leave your machine, except for AI
+  requests. The Docker setup binds to `127.0.0.1` for this reason.
+- **Hosting it is fine**, for example on [GitHub Pages](#github-pages): the hosted copy is still
+  only static files, and nothing is sent to the host. Prefer an origin that serves nothing else,
+  such as a custom domain, because any page on the same origin can read the saved keys.
 
 ---
 
@@ -377,7 +437,7 @@ SketchNotes/                     <- the folder you picked
 |---|---|
 | `npm install` | Installs dependencies and copies Excalidraw's fonts into `public/fonts` |
 | `npm run dev` | Dev server with hot reload on port 5173 |
-| `npm run build` | Type-checks and builds the static app into `dist/` |
+| `npm run build` | Type-checks and builds the static app into `dist/`. Set `BASE_PATH=/sub-folder/` to serve it from a sub-path. |
 | `npm start` | Builds, then serves `dist/` on port 5173 |
 | `npm run typecheck` | Type-checks only |
 
@@ -409,6 +469,7 @@ src/
   components/              sidebar, AI panel, settings dialog, pen bar
   styles.css               theme and layout
 Dockerfile, docker-compose.yml   static build served by nginx on 127.0.0.1:8080
+.github/workflows/deploy-pages.yml  builds and publishes to GitHub Pages on push to main
 ```
 
 ### How the AI edits the board
